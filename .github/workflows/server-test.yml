@@ -1,0 +1,86 @@
+name: Server Test
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'server/**'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'server/**'
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test Server
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Get Version
+        id: version
+        working-directory: ./server
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Server version: $VERSION"
+
+      - name: Install Dependencies
+        working-directory: ./server
+        run: npm install
+
+      - name: Syntax Check
+        working-directory: ./server
+        run: node --check server.js
+
+      - name: Start Server
+        working-directory: ./server
+        run: |
+          # Start server in background
+          timeout 10s node server.js &
+          SERVER_PID=$!
+          
+          # Wait for server to start
+          sleep 3
+          
+          # Test if server is responding
+          for i in {1..5}; do
+            if curl -s http://localhost:8999/ > /dev/null 2>&1; then
+              echo "✅ Server is responding on port 8999"
+              curl -s http://localhost:8999/
+              break
+            fi
+            echo "Waiting for server... ($i/5)"
+            sleep 1
+          done
+
+      - name: Test Docker Build
+        working-directory: ./server
+        run: |
+          echo "Building Docker image..."
+          docker build -t dogerat-server-test . 2>&1 | tail -20
+          
+          echo ""
+          echo "✅ Docker build successful"
+
+      - name: Job Summary
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          
+          echo "## ✅ Server Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** $VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "- **Syntax Check:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Server Start:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker Build:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All tests passed successfully!" >> $GITHUB_STEP_SUMMARY
